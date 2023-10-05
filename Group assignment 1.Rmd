@@ -1,0 +1,29 @@
+---
+title: "Group assignment 1"
+author: "Rylan Mueller"
+date: "10/5/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+```
+
+
+```{r}
+set.seed(1019)
+airbnb <- read.csv("https://ajohns24.github.io/data/NYC_airbnb_kaggle.csv") %>% 
+  filter(price < 1000) %>% 
+  sample_n(5000)
+neighborhoods <- read.csv("https://ajohns24.github.io/data/NYC_nbhd_kaggle.csv")
+```
+
+```{r}
+dataset <- left_join(airbnb, neighborhoods, by = join_by("neighbourhood_cleansed" == "neighbourhood"))
+```
+
+
