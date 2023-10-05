@@ -1,0 +1,39 @@
+---
+title: "Group assignment 1"
+author: "Rylan, Tina, Ana, Antara"
+date: "10/5/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(kknn)
+```
+
+
+```{r}
+set.seed(1019)
+airbnb <- read.csv("https://ajohns24.github.io/data/NYC_airbnb_kaggle.csv") %>% 
+  filter(price < 1000) %>% 
+  sample_n(5000)
+neighborhoods <- read.csv("https://ajohns24.github.io/data/NYC_nbhd_kaggle.csv")
+```
+
+```{r}
+dataset <- left_join(airbnb, neighborhoods, by = join_by("neighbourhood_cleansed" == "neighbourhood")) %>% 
+  select(-id)
+
+dataset
+```
+**We removed "id" because the generated id number for each listing has no bearing on the rental price. The host would have no idea about the id number when listing the price.**
+
+```{r}
+new_data <- recipe(price ~ ., data = dataset) %>% 
+  step_string2factor(all_nominal_predictors()) %>% 
+  step_impute_knn(all_predictors())
+```
+
