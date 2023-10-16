@@ -1,0 +1,67 @@
+---
+title: "Group assignment 1"
+author: "Rylan, Tina, Ana, Antara"
+date: "10/5/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(kknn)
+library(tidyverse)
+tidymodels_prefer()
+library(tidymodels)
+```
+
+
+```{r}
+set.seed(1019)
+airbnb <- read.csv("https://ajohns24.github.io/data/NYC_airbnb_kaggle.csv") %>% 
+  filter(price < 1000) %>% 
+  sample_n(5000)
+neighborhoods <- read.csv("https://ajohns24.github.io/data/NYC_nbhd_kaggle.csv")
+```
+
+```{r}
+airbnb_sub <- left_join(airbnb, neighborhoods, by = join_by("neighbourhood_cleansed" == "neighbourhood")) %>% 
+  select(-id)
+```
+**We removed "id" because the generated id number for each listing has no bearing on the rental price. The host would have no idea about the id number when listing the price.**
+
+```{r}
+airbnb_recipe <- recipe(price ~ ., data = airbnb_sub) %>% 
+  step_string2factor(all_nominal_predictors()) %>% 
+  step_impute_knn(all_predictors())
+```
+
+```{r}
+airbnb_sub %>% 
+  ggplot(aes(x = neighbourhood_group, y = price)) +
+  geom_boxplot()
+```
+
+```{r}
+# LASSO Algorithm
+lasso_spec <- linear_reg() %>%             
+  set_mode("regression") %>% 
+  set_engine("glmnet") %>%                 
+  set_args(mixture = 1, penalty = tune())
+
+#workflow
+lasso_workflow <- workflow() %>% 
+  add_recipe(airbnb_recipe) %>% 
+  add_model(lasso_spec)
+
+#Estimate
+lasso_models <- lasso_workflow %>% 
+  tune_grid(
+    grid = grid_regular(penalty(range = c(-5, -0.1)), levels = 50),  
+    resamples = vfold_cv(airbnb_sub, v = 10),   
+    metrics = metric_set(mae)
+  )
+```
+
