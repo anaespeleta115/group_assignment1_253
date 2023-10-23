@@ -1,0 +1,173 @@
+---
+title: "Group assignment 1"
+author: "Rylan, Tina, Ana, Antara"
+date: "10/5/2023"
+output:
+  html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(kknn)
+library(tidyverse)
+library(tidymodels)
+tidymodels_prefer()
+```
+
+
+## Introduction
+
+
+In the dynamic domain of Airbnb listings within New York City, we seeks to find out the determinants governing pricing structures to offer precise price predictions. We use the Lasso model, a parametric model in machine learning, for the purpose of identifying the paramount factors influencing pricing. 
+
+
+## Model Selection
+
+We aim to select a parametric model that offers a more profound insight into the relationships between our predictors (AirBnB features) and the prices, while also simplifying the model to prevent overfitting, which OLS couldn't achieve. Lasso regression can assist us in identifying the most influential predictors by gradually dropping less important ones as we increase the penalty for added complexity.
+
+
+
+```{r echo=FALSE}
+#access data
+set.seed(1019)
+airbnb <- read.csv("https://ajohns24.github.io/data/NYC_airbnb_kaggle.csv") %>% 
+  filter(price <= 1000) %>% 
+  sample_n(5000)
+neighborhoods <- read.csv("https://ajohns24.github.io/data/NYC_nbhd_kaggle.csv")
+
+```
+
+```{r echo=FALSE}
+#data cleaning
+airbnb_sub <- left_join(airbnb, neighborhoods, by = join_by("neighbourhood_cleansed" == "neighbourhood")) %>% 
+  mutate(host_response_rate = str_remove(host_response_rate, "%")) %>% 
+  mutate(host_response_rate = as.numeric(host_response_rate))%>% 
+  select(-id) %>% 
+  mutate(y = strsplit(amenities, ","))
+
+num_amenities <- rep(0,5000)
+
+for (i in 1:5000) {
+  num_amenities[i] <- length(airbnb_sub$y[[i]])
+}
+
+airbnb_sub <- data.frame(airbnb_sub, num_amenities) %>% 
+  select(-y, -amenities, -neighbourhood_cleansed, -calendar_updated,-square_feet)
+
+```
+## Data Preprocessing
+
+1. Data Cleaning: We initiated our analysis by conducting an initial data scan, identifying that the 'id' variable doesn't contribute useful information to predicting prices. Additionally, we observed 4950 missing value in the 'square_feet' column and chose to exclude this predictor.
+
+2. Feature Transformation: To ensure compatibility with Lasso regression, which requires numerical variables, we performed the following transformations:
+   - Converted 'host_response_rate' from a percentage to numeric.
+   - Transformed 'amenities' from a list of characters to the count of amenities.
+   
+   
+3. Filtering Unquantifiable Predictors: We filtered out predictors that couldn't be quantified, such as 'neighbourhood_cleansed', 'calendar_updated', and 'host_response_time'. 
+
+4. Handling Missing Values: For predictors with only a small number of missing values, we used KNN to impute the missing data based on the values of their nearest neighbors.
+
+
+
+```{r}
+# recipe for lasso
+airbnb_recipe <- recipe(price ~ ., data = airbnb_sub) %>% 
+  step_string2factor(all_nominal_predictors()) %>% 
+  step_impute_knn(all_predictors()) %>% 
+  step_nzv(all_predictors()) %>%
+  step_dummy(all_nominal_predictors())
+```
+
+```{r}
+airbnb_sub %>% 
+  ggplot(aes(x = neighbourhood_group, y = price)) +
+  geom_boxplot()
+```
+
+```{r}
+# LASSO Algorithm
+lasso_spec <- linear_reg() %>%             
+  set_mode("regression") %>% 
+  set_engine("glmnet") %>%                 
+  set_args(mixture = 1, penalty = tune())
+
+#workflow
+lasso_workflow <- workflow() %>% 
+  add_recipe(airbnb_recipe) %>% 
+  add_model(lasso_spec)
+
+#Estimate
+lasso_models <- lasso_workflow %>% 
+  tune_grid(
+    grid = grid_regular(penalty(range = c(-1, 1)), levels = 50),  
+    resamples = vfold_cv(airbnb_sub, v = 10),   
+    metrics = metric_set(mae)
+  )
+```
+
+## Parameter selection
+
+To select the ideal value for $\lambda$, we first had to determine the range of values we would consider, which took some trial and error. Once we observed a global minimum value in the graph, we knew that we had selected an appropriate range. Finally, we decided to select the most parsimonious λ, since we wanted to minimize the number of predictors included in the final model, while still achieving the desired accuracy. 
+
+Our range ended up being from $10^{-1}$ to $10^1$, and with levels=50 we got that the most parsimonious value for $\lambda$ was approximately 4.71, which produced an MAE of 46.18. This means that, on average, our predicted price was $\$46.2$ off from the actual price.
+
+
+
+
+```{r}
+autoplot(lasso_models) + 
+  scale_x_continuous() + 
+  xlab(expression(lambda))
+
+parsimonious_penalty <- lasso_models %>% 
+  select_by_one_std_err(metric = "mae", desc(penalty))
+parsimonious_penalty
+
+```
+
+```{r echo=FALSE}
+final_lasso <- lasso_workflow %>% 
+  finalize_workflow(parameters = parsimonious_penalty) %>% 
+  fit(data = airbnb_sub)
+
+
+final_lasso %>% 
+  tidy() 
+```
+
+```{r}
+# retained 16 predictors
+final_lasso %>% 
+  tidy() %>% 
+  filter(estimate != 0)
+```
+
+
+
+
+## Analysis of Coefficients
+
+While the coefficients of the predictors are not interpretable based on value as in a typical Least Squares model, we can determine the impact of the listed features based on the sign of the coefficient. AirBnBs which accommodate more people are correlated with higher prices. As for the rooms themselves, our model predicts that a greater number of bathrooms and bedrooms in an AirBnB will correlate with higher prices. For property type, condominiums, lofts, and timeshares are predicted to be more expensive than apartments, while private and shared rooms correlate with lower prices compared to an AirBnB consisting of an entire home/apartment. Further, AirBnBs which are business travel ready are predicted to be pricier than those which are not. Focusing on location, AirBnBs located in Manhattan are predicted to be more expensive than those in the Bronx, while AirBnBs located in Staten Island are predicted to be cheaper than those in the Bronx. 
+
+Unsure how to interpret:
+longitude (not sure how to interpret impact on location)
+availability_30 (unclear what this is about)
+number_of_reviews (near zero)
+reviews_per_month (seems counterintuitive)
+
+
+## Conclusions
+
+Our final model retained 16 predictors: longitude, accommodates, bathrooms, bedrooms, availability_30, number_of_reviews, reviews_per_month, property_type_Condominium, property_type_Loft, property_type_Timeshare, room_type_Private.room, room_type_Shared.room, is_business_travel_ready_t, neighbourhood_group_Manhattan, and neighbourhood_group_Staten.Island. 
+
+This model had a penalty of approximately 5.69, with an MAE of approximately 46.60. This indicates that the price predictions are on average off by $\$46.60$. Compared with mean price for airbnb ($\$138.673$), we think the deviation is quite large. 
+
+
+## Future Improvements
+
+To further enhance our analysis, we could explore options to quantify selected categorical variables. For example, converting 'calendar_updated' into time measured in minutes could potentially offer valuable information.
