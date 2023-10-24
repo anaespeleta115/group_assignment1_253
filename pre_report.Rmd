@@ -30,7 +30,6 @@ In the dynamic domain of Airbnb listings within New York City, we seeks to find 
 We aim to select a parametric model that offers a more profound insight into the relationships between our predictors (AirBnB features) and the prices, while also simplifying the model to prevent overfitting, which OLS couldn't achieve. Lasso regression can assist us in identifying the most influential predictors by gradually dropping less important ones as we increase the penalty for added complexity.
 
 
-
 ```{r echo=FALSE}
 #access data
 set.seed(1019)
@@ -41,7 +40,7 @@ neighborhoods <- read.csv("https://ajohns24.github.io/data/NYC_nbhd_kaggle.csv")
 
 ```
 
-```{r echo=FALSE}
+```{r}
 #data cleaning
 airbnb_sub <- left_join(airbnb, neighborhoods, by = join_by("neighbourhood_cleansed" == "neighbourhood")) %>% 
   mutate(host_response_rate = str_remove(host_response_rate, "%")) %>% 
@@ -57,7 +56,6 @@ for (i in 1:5000) {
 
 airbnb_sub <- data.frame(airbnb_sub, num_amenities) %>% 
   select(-y, -amenities, -neighbourhood_cleansed, -calendar_updated,-square_feet)
-
 ```
 ## Data Preprocessing
 
@@ -73,7 +71,6 @@ airbnb_sub <- data.frame(airbnb_sub, num_amenities) %>%
 4. Handling Missing Values: For predictors with only a small number of missing values, we used KNN to impute the missing data based on the values of their nearest neighbors.
 
 
-
 ```{r}
 # recipe for lasso
 airbnb_recipe <- recipe(price ~ ., data = airbnb_sub) %>% 
@@ -83,11 +80,6 @@ airbnb_recipe <- recipe(price ~ ., data = airbnb_sub) %>%
   step_dummy(all_nominal_predictors())
 ```
 
-```{r}
-airbnb_sub %>% 
-  ggplot(aes(x = neighbourhood_group, y = price)) +
-  geom_boxplot()
-```
 
 ```{r}
 # LASSO Algorithm
@@ -96,12 +88,12 @@ lasso_spec <- linear_reg() %>%
   set_engine("glmnet") %>%                 
   set_args(mixture = 1, penalty = tune())
 
-#workflow
+# Workflow
 lasso_workflow <- workflow() %>% 
   add_recipe(airbnb_recipe) %>% 
   add_model(lasso_spec)
 
-#Estimate
+# Estimate
 lasso_models <- lasso_workflow %>% 
   tune_grid(
     grid = grid_regular(penalty(range = c(-1, 1)), levels = 50),  
@@ -130,12 +122,12 @@ parsimonious_penalty
 
 ```
 
-```{r echo=FALSE}
+```{r}
 final_lasso <- lasso_workflow %>% 
   finalize_workflow(parameters = parsimonious_penalty) %>% 
   fit(data = airbnb_sub)
 
-
+#All predictors used shown
 final_lasso %>% 
   tidy() 
 ```
@@ -152,22 +144,30 @@ final_lasso %>%
 
 ## Analysis of Coefficients
 
-While the coefficients of the predictors are not interpretable based on value as in a typical Least Squares model, we can determine the impact of the listed features based on the sign of the coefficient. AirBnBs which accommodate more people are correlated with higher prices. As for the rooms themselves, our model predicts that a greater number of bathrooms and bedrooms in an AirBnB will correlate with higher prices. For property type, condominiums, lofts, and timeshares are predicted to be more expensive than apartments, while private and shared rooms correlate with lower prices compared to an AirBnB consisting of an entire home/apartment. Further, AirBnBs which are business travel ready are predicted to be pricier than those which are not. Focusing on location, AirBnBs located in Manhattan are predicted to be more expensive than those in the Bronx, while AirBnBs located in Staten Island are predicted to be cheaper than those in the Bronx. 
+While the coefficients of the predictors are not interpretable based on value as in a typical Least Squares model, we can determine the impact of the listed features based on the sign of the coefficient. AirBnBs which accommodate more people are correlated with higher prices. As for the rooms themselves, our model predicts that a greater number of bathrooms and bedrooms in an AirBnB will correlate with higher prices. For property type, condominiums, lofts, and timeshares are predicted to be more expensive than apartments, while private and shared rooms correlate with lower prices compared to an AirBnB consisting of an entire home/apartment. Further, AirBnBs which are business travel ready are predicted to be pricier than those which are not. Focusing on location, AirBnBs located in Manhattan are predicted to be more expensive than those in the Bronx, while AirBnBs located in Staten Island are predicted to be cheaper than those in the Bronx. The further the AirBnB is to the east, the cheaper it will be. The number of reviews appears to have limited negative influence, as the coefficient is close to zero. However, based on the reviews per month, an AirBnBs with fewer reviews is likely to be cheaper. The greater the availability in the next 30 days, the more expensive the AirBnBs will be.
 
-Unsure how to interpret:
-longitude (not sure how to interpret impact on location)
-availability_30 (unclear what this is about)
-number_of_reviews (near zero)
-reviews_per_month (seems counterintuitive)
 
+
+```{r}
+final_lasso %>%
+  augment(new_data = airbnb_sub) %>%
+  mutate(.resid = price - .pred) %>%
+  ggplot(aes(x = .pred, y = .resid)) +
+    geom_point() +
+    geom_hline(yintercept = 0)
+```
+
+## Analysis of residual plot
+
+The residual plot of our final model shows points that are not balanced between the upper and lower half of the plot and there is a slight cone shape, meaning that the residual variance increases as the prediction values increase. This means that our error is not constant, so we cannot conclude that our model is not wrong.
 
 ## Conclusions
 
 Our final model retained 16 predictors: longitude, accommodates, bathrooms, bedrooms, availability_30, number_of_reviews, reviews_per_month, property_type_Condominium, property_type_Loft, property_type_Timeshare, room_type_Private.room, room_type_Shared.room, is_business_travel_ready_t, neighbourhood_group_Manhattan, and neighbourhood_group_Staten.Island. 
 
-This model had a penalty of approximately 5.69, with an MAE of approximately 46.60. This indicates that the price predictions are on average off by $\$46.60$. Compared with mean price for airbnb ($\$138.673$), we think the deviation is quite large. 
+This model had a penalty of approximately 5.69, with an MAE of approximately 46.60. This indicates that the price predictions are on average off by $\$46.60$. Compared with mean price for airbnb ($\$138.673$), we think the deviation is quite large, that is the model doesn't provide accurate predictions. Also, the residual plot shows that we might make the wrong model by having unreasonable assumptions. 
 
 
 ## Future Improvements
 
-To further enhance our analysis, we could explore options to quantify selected categorical variables. For example, converting 'calendar_updated' into time measured in minutes could potentially offer valuable information.
+To further enhance our analysis, we could explore options to quantify selected categorical variables. For example, converting 'calendar_updated' into time measured in minutes could potentially offer valuable information. Furthermore, rather than simplifying ‘amenities’ to a number of amenities, it would be useful to add a variable for each amenity. For example, would having a washer and dryer available be more predictive of price than if a TV was available? Also, we got rid of ‘neighborhood_cleansed’. There is definitely some utility to using individual neighborhoods to predict price, but because of how many predictors there were, we deemed it not useful for our model.
